@@ -1,4 +1,4 @@
-#include <EEPROM.h> 
+#include <EEPROM.h>
 
 const int tempPin = A0;               
 const int recordInterval = 5000; // 5 seconds     
@@ -8,6 +8,8 @@ const int addrStoreLocation = 510;    // address for last 2
 
 int addr = 0;                         
 float tempC;                      
+
+unsigned long prevLogMillis = 0;    // For non-blocking delay
 
 void setup() {
   Serial.begin(9600);                 
@@ -28,6 +30,14 @@ void loop() {
     }
   }
 
+  // Check if it's time to log a new temperature reading
+  if (millis() - prevLogMillis >= recordInterval) {
+    prevLogMillis = millis();
+    logTemperature();
+  }
+}
+
+void logTemperature() {
   // if room to write another 2-byte temperature value
   if (addr + 2 <= maxDataAddr) {
     int rawReading = analogRead(tempPin); // read analog value from temperature sensor (0–1023)
@@ -35,39 +45,39 @@ void loop() {
     // raw reading to celsius using TMP36 formula
     tempC = ((rawReading * 5.0 / 1023.0) - 0.5) * 100.0;
 
-    int tempInt = tempC * 100;            
-    byte lowByte = tempInt & 0xFF; // lower 8 bits
-    byte highByte = (tempInt >> 8) & 0xFF;// upper 8 bits
+    int tempInt = tempC * 100; // store temperature as an integer (with 2 decimal precision)
 
-    EEPROM.update(addr, lowByte); // lower byte to EEPROM
-    EEPROM.update(addr + 1, highByte); // upper byte to next EEPROM 
-    addr += 2; // move 2 bytes
-    saveAddress(addr);                   
+    byte lowByte = tempInt & 0xFF; // lower 8 bits of temperature
+    byte highByte = (tempInt >> 8) & 0xFF; // upper 8 bits of temperature
 
+    // Write temperature to EEPROM
+    EEPROM.update(addr, lowByte); 
+    EEPROM.update(addr + 1, highByte); 
     Serial.print("Logged: ");
     Serial.print(tempC, 1);              
-    Serial.println(" C");
+    Serial.print(" C at EEPROM address ");
+    Serial.println(addr);
+
+    addr += 2; // move 2 bytes forward
+    saveAddress(addr); // store the new address to EEPROM
   } else {
     Serial.println("EEPROM FULL. Use CLEAR to erase.");
   }
-
-  delay(recordInterval);
 }
 
 void readEEPROMData() {
   Serial.println("Reading EEPROM data...");
-  for (int i = 0; i < addr; i += 2) { // read in 2-byte blocks
-    byte low = EEPROM.read(i); // lower byte
-    byte high = EEPROM.read(i + 1); // upper byte
-    int tempRaw = (high << 8) | low; // combine to a single integer
+  for (int i = 0; i < addr; i += 2) { // read in 2-byte blocks for temperature
+    byte low = EEPROM.read(i); // lower byte of temperature
+    byte high = EEPROM.read(i + 1); // upper byte of temperature
+    int tempRaw = (high << 8) | low; // combine the bytes to get the temperature value
+    float temperature = tempRaw / 100.0; // convert to float (with two decimal places)
 
-    float temperature = tempRaw / 100.0; // back to float with two decimal places
-
-    // skip extreme temps
+    // skip extreme temperatures
     if (temperature < -40 || temperature > 125) continue;
 
-    Serial.print("Reading ");
-    Serial.print(i / 2);                  
+    Serial.print("Reading from EEPROM address ");
+    Serial.print(i);                  
     Serial.print(": ");
     Serial.print(temperature);
     Serial.println(" C");                 
